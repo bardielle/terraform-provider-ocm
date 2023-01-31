@@ -3,7 +3,6 @@ module github.com/terraform-redhat/terraform-provider-ocm
 go 1.17
 
 require (
-	github.com/aws/aws-sdk-go v1.44.184
 	github.com/hashicorp/go-version v1.6.0
 	github.com/hashicorp/terraform-plugin-docs v0.13.0
 	github.com/hashicorp/terraform-plugin-framework v0.5.0

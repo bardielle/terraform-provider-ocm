@@ -22,6 +22,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/hashicorp/terraform-plugin-go/tftypes"
 	"net/http"
 	"net/url"
 	"os"
@@ -755,35 +756,12 @@ func (r *ClusterRosaClassicResource) Delete(ctx context.Context, request tfsdk.D
 
 func (r *ClusterRosaClassicResource) ImportState(ctx context.Context, request tfsdk.ImportResourceStateRequest,
 	response *tfsdk.ImportResourceStateResponse) {
-	// Try to retrieve the object:
-	get, err := r.collection.Cluster(request.ID).Get().SendContext(ctx)
-	if err != nil {
-		response.Diagnostics.AddError(
-			"Can't find cluster",
-			fmt.Sprintf(
-				"Can't find cluster with identifier '%s': %v",
-				request.ID, err,
-			),
-		)
-		return
-	}
-	object := get.Body()
-
-	// Save the state:
-	state := &ClusterRosaClassicState{}
-	err = populateRosaClassicClusterState(ctx, object, state, r.logger, DefaultHttpClient{})
-	if err != nil {
-		response.Diagnostics.AddError(
-			"Can't populate cluster state",
-			fmt.Sprintf(
-				"Received error %v", err,
-			),
-		)
-		return
-	}
-
-	diags := response.State.Set(ctx, state)
-	response.Diagnostics.Append(diags...)
+	tfsdk.ResourceImportStatePassthroughID(
+		ctx,
+		tftypes.NewAttributePath().WithAttributeName("id"),
+		request,
+		response,
+	)
 }
 
 // populateRosaClassicClusterState copies the data from the API object to the Terraform state.
