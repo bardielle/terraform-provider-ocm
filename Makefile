@@ -25,6 +25,13 @@ else
 	DESTINATION_PREFIX=$(HOME)/.terraform.d/plugins
 endif
 
+HOSTNAME=hashicorp.com
+NAMESPACE=terraform-redhat
+NAME=ocm
+GO_ARCH=$(shell go env GOARCH)
+TARGET_ARCH=$(shell go env GOOS)_${GO_ARCH}
+GORELEASER_ARCH=${TARGET_ARCH}
+
 # Import path of the project:
 import_path:=github.com/terraform-redhat/terraform-provider-ocm
 
@@ -44,13 +51,12 @@ build:
 
 .PHONY: install
 install: build
-	platform=$(terraform version -json | jq -r .platform); \
 	extension=""; \
-	if [[ "$${platform}" =~ ^windows_.*$$ ]]; then \
+	if [[ "${TARGET_ARCH}" =~ ^windows_.*$$ ]]; then \
 	  extension=".exe"; \
 	fi; \
-	dir="$(DESTINATION_PREFIX).terraform.d/plugins/localhost/terraform-redhat/ocm/$(version)/${platform}"; \
-	file="terraform-provider-ocm${extension}"; \
+	dir="$(DESTINATION_PREFIX)/terraform.local/local/ocm/$(version)/$(TARGET_ARCH)"; \
+	file="terraform-provider-ocm_v$(version)${extension}"; \
 	mkdir -p "$${dir}"; \
 	mv ${BINARY} "$${dir}/$${file}"
 

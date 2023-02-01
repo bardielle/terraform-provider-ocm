@@ -756,6 +756,7 @@ func (r *ClusterRosaClassicResource) Delete(ctx context.Context, request tfsdk.D
 func (r *ClusterRosaClassicResource) ImportState(ctx context.Context, request tfsdk.ImportResourceStateRequest,
 	response *tfsdk.ImportResourceStateResponse) {
 	// Try to retrieve the object:
+	r.logger.Debug(ctx, "***********  request.ID", request.ID)
 	get, err := r.collection.Cluster(request.ID).Get().SendContext(ctx)
 	if err != nil {
 		response.Diagnostics.AddError(
@@ -770,6 +771,7 @@ func (r *ClusterRosaClassicResource) ImportState(ctx context.Context, request tf
 	object := get.Body()
 
 	// Save the state:
+	r.logger.Debug(ctx, "***********  object", object)
 	state := &ClusterRosaClassicState{}
 	err = populateRosaClassicClusterState(ctx, object, state, r.logger, DefaultHttpClient{})
 	if err != nil {
@@ -781,6 +783,30 @@ func (r *ClusterRosaClassicResource) ImportState(ctx context.Context, request tf
 		)
 		return
 	}
+
+	state.Proxy = &Proxy{
+		HttpProxy:  types.String{},
+		HttpsProxy: types.String{},
+		NoProxy:    types.String{},
+	}
+
+	state.AWSSubnetIDs.Elems = make([]attr.Value, 0)
+
+	r.logger.Debug(ctx, "***********  state", state)
+	r.logger.Debug(ctx, "***********  state.CCS.Value", state.CCSEnabled.Value)
+	r.logger.Debug(ctx, "***********  state.API.Value", state.APIURL.Value)
+	r.logger.Debug(ctx, "***********  state.ConsoleURL.Value", state.ConsoleURL.Value)
+	r.logger.Debug(ctx, "***********  state.aws_account_id.Value", state.AWSAccountID.Value)
+	r.logger.Debug(ctx, "***********  state.state.Value", state.State.Value)
+	r.logger.Debug(ctx, "***********  state.AvailabilityZones.Value", state.AvailabilityZones)
+
+	r.logger.Debug(ctx, "***********  state.STS.OIDCEndpointURL", state.Sts.OIDCEndpointURL.Value)
+	r.logger.Debug(ctx, "***********  state.STS.Thumbprint", state.Sts.Thumbprint.Value)
+	r.logger.Debug(ctx, "***********  state.STS.RoleARN", state.Sts.RoleARN.Value)
+	r.logger.Debug(ctx, "***********  state.STS.SupportRoleArn", state.Sts.SupportRoleArn.Value)
+	r.logger.Debug(ctx, "***********  state.STS.MasterRoleARN", state.Sts.InstanceIAMRoles.MasterRoleARN.Value)
+	r.logger.Debug(ctx, "***********  state.STS.WorkerRoleARN", state.Sts.InstanceIAMRoles.WorkerRoleARN.Value)
+	r.logger.Debug(ctx, "***********  state.STS.OperatorRolePrefix", state.Sts.OperatorRolePrefix.Value)
 
 	diags := response.State.Set(ctx, state)
 	response.Diagnostics.Append(diags...)
