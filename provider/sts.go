@@ -10,6 +10,7 @@ func stsResource() tfsdk.NestedAttributes {
 		"oidc_endpoint_url": {
 			Description: "OIDC Endpoint URL",
 			Type:        types.StringType,
+			Optional:    true,
 			Computed:    true,
 		},
 		"thumbprint": {

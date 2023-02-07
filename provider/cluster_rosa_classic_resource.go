@@ -507,6 +507,7 @@ func createClassicClusterObject(ctx context.Context,
 		sts.InstanceIAMRoles(instanceIamRoles)
 
 		sts.OperatorRolePrefix(state.Sts.OperatorRolePrefix.Value)
+
 		aws.STS(sts)
 	}
 

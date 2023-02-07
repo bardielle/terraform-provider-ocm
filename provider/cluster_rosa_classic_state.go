@@ -58,6 +58,7 @@ type ClusterRosaClassicState struct {
 
 type Sts struct {
 	OIDCEndpointURL    types.String    `tfsdk:"oidc_endpoint_url"`
+	OidcPrivateKey     types.String    `tfsdk:"oidc_private_key_secret_arn"`
 	Thumbprint         types.String    `tfsdk:"thumbprint"`
 	RoleARN            types.String    `tfsdk:"role_arn"`
 	SupportRoleArn     types.String    `tfsdk:"support_role_arn"`

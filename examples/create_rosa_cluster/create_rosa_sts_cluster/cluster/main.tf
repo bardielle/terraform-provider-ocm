@@ -41,6 +41,8 @@ locals {
         worker_role_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/ManagedOpenShift-Worker-Role"
       },
       operator_role_prefix = var.operator_role_prefix,
+      oidc_private_key_secret_arn = "",
+      oidc_endpoint_url = ""
   }
 }
 
