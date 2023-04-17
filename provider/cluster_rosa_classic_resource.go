@@ -985,6 +985,31 @@ func (r *ClusterRosaClassicResource) Update(ctx context.Context, request tfsdk.U
 		return
 	}
 
+	//check cluster state is ready
+	get, err := r.clusterCollection.Cluster(state.ID.Value).Get().SendContext(ctx)
+	if err != nil {
+		response.Diagnostics.AddError(
+			"Can't find cluster",
+			fmt.Sprintf(
+				"Can't find cluster with identifier '%s': %v",
+				state.ID.Value, err,
+			),
+		)
+		return
+	}
+
+	clusterObject := get.Body()
+	if clusterObject.State() != cmv1.ClusterStateReady {
+		response.Diagnostics.AddError(
+			"Cluster is not yet ready",
+			fmt.Sprintf(
+				"Can't update cluster '%s', cluster state is not ready but '%s'",
+				state.ID.Value, clusterObject.State(),
+			),
+		)
+		return
+	}
+
 	// Send request to update the cluster:
 	updateNodes := false
 	clusterBuilder := cmv1.NewCluster()
@@ -1024,6 +1049,45 @@ func (r *ClusterRosaClassicResource) Update(ctx context.Context, request tfsdk.U
 	if updateNodes {
 		clusterBuilder = clusterBuilder.Nodes(clusterNodesBuilder)
 	}
+
+	if !plan.Version.Unknown && !plan.Version.Null {
+		newVersion := plan.Version.Value
+		currentVersion := clusterObject.Version().ID()
+		upgradeIsNeeded := false
+		upgradeIsNeeded, err = r.checkIfUpgradeIsNeeded(currentVersion, newVersion)
+		if err != nil {
+			response.Diagnostics.AddError(
+				"Can't update cluster version",
+				fmt.Sprintf(
+					"Received error %v", err,
+				),
+			)
+			return
+		}
+		if !upgradeIsNeeded {
+			response.Diagnostics.AddError(
+				"Can't upgrade cluster",
+				fmt.Sprintf(
+					"Current cluster version `%s` is greater or equal to the new required version `%s`",
+					currentVersion, newVersion,
+				),
+			)
+			return
+		}
+
+		err = r.checkExistingScheduledUpgrade(ctx, state.ID.Value)
+		if err != nil {
+			response.Diagnostics.AddError(
+				"Can't update cluster version",
+				fmt.Sprintf(
+					"Received error %v", err,
+				),
+			)
+			return
+		}
+
+	}
+
 	clusterSpec, err := clusterBuilder.Build()
 	if err != nil {
 		response.Diagnostics.AddError(
@@ -1069,6 +1133,80 @@ func (r *ClusterRosaClassicResource) Update(ctx context.Context, request tfsdk.U
 	}
 	diags = response.State.Set(ctx, state)
 	response.Diagnostics.Append(diags...)
+}
+
+func (r *ClusterRosaClassicResource) checkIfUpgradeIsNeeded(originalVersion, newVersion string) (bool, error) {
+	wantedVersion, err := semver.NewVersion(newVersion)
+	if err != nil {
+		return false, err
+	}
+	currentVersion, err := semver.NewVersion(originalVersion)
+	if err != nil {
+		return false, err
+	}
+	return wantedVersion.GreaterThan(currentVersion), nil
+}
+
+func (r *ClusterRosaClassicResource) checkExistingScheduledUpgrade(ctx context.Context, clusterID string) error {
+	scheduledUpgrade, upgradeState, err := r.getScheduledUpgrade(clusterID)
+	if err != nil {
+		r.logger.Error(ctx, "Failed to get scheduled upgrades for cluster '%s': %v", clusterID, err)
+		return err
+	}
+	if scheduledUpgrade != nil {
+		return fmt.Errorf("there is already a %s upgrade to version %s on %s",
+			upgradeState.Value(),
+			scheduledUpgrade.Version(),
+			scheduledUpgrade.NextRun().Format("2006-01-02 15:04 MST"),
+		)
+	}
+
+	return nil
+}
+
+func (r *ClusterRosaClassicResource) getScheduledUpgrade(clusterID string) (*cmv1.UpgradePolicy, *cmv1.UpgradePolicyState, error) {
+	upgradePolicies, err := r.getUpgradePolicies(clusterID)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, upgradePolicy := range upgradePolicies {
+		if upgradePolicy.UpgradeType() == "OSD" {
+			state, err := r.clusterCollection.Cluster(clusterID).
+				UpgradePolicies().UpgradePolicy(upgradePolicy.ID()).
+				State().
+				Get().
+				Send()
+			if err != nil {
+				return nil, nil, err
+			}
+
+			return upgradePolicy, state.Body(), nil
+		}
+	}
+
+	return nil, nil, nil
+}
+
+func (r *ClusterRosaClassicResource) getUpgradePolicies(clusterID string) (upgradePolicies []*cmv1.UpgradePolicy, err error) {
+	collection := r.clusterCollection.Cluster(clusterID).
+		UpgradePolicies()
+	page := 1
+	size := 100
+	for {
+		response, err := collection.List().
+			Page(page).
+			Size(size).
+			Send()
+		if err != nil {
+			return nil, err
+		}
+		upgradePolicies = append(upgradePolicies, response.Items().Slice()...)
+		if response.Size() < size {
+			break
+		}
+		page++
+	}
+	return
 }
 
 func (r *ClusterRosaClassicResource) Delete(ctx context.Context, request tfsdk.DeleteResourceRequest,
