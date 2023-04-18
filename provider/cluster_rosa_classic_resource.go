@@ -25,6 +25,10 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/client"
 	"github.com/aws/aws-sdk-go/aws/request"
+	"github.com/openshift/rosa/pkg/helper"
+	"github.com/openshift/rosa/pkg/interactive/confirm"
+	"github.com/openshift/rosa/pkg/ocm"
+	"github.com/zgalor/weberr"
 	"net/http"
 	"net/url"
 	"os"
@@ -54,6 +58,7 @@ const (
 	maxClusterNameLength = 15
 	tagsPrefix           = "rosa_"
 	tagsOpenShiftVersion = tagsPrefix + "openshift_version"
+	DefaultChannelGroup  = "stable"
 )
 
 var kmsArnRE = regexp.MustCompile(
@@ -1051,30 +1056,6 @@ func (r *ClusterRosaClassicResource) Update(ctx context.Context, request tfsdk.U
 	}
 
 	if !plan.Version.Unknown && !plan.Version.Null {
-		newVersion := plan.Version.Value
-		currentVersion := clusterObject.Version().ID()
-		upgradeIsNeeded := false
-		upgradeIsNeeded, err = r.checkIfUpgradeIsNeeded(currentVersion, newVersion)
-		if err != nil {
-			response.Diagnostics.AddError(
-				"Can't update cluster version",
-				fmt.Sprintf(
-					"Received error %v", err,
-				),
-			)
-			return
-		}
-		if !upgradeIsNeeded {
-			response.Diagnostics.AddError(
-				"Can't upgrade cluster",
-				fmt.Sprintf(
-					"Current cluster version `%s` is greater or equal to the new required version `%s`",
-					currentVersion, newVersion,
-				),
-			)
-			return
-		}
-
 		err = r.checkExistingScheduledUpgrade(ctx, state.ID.Value)
 		if err != nil {
 			response.Diagnostics.AddError(
@@ -1085,6 +1066,53 @@ func (r *ClusterRosaClassicResource) Update(ctx context.Context, request tfsdk.U
 			)
 			return
 		}
+
+		clusterVersionID := clusterObject.Version().ID()
+		if clusterVersionID == "" {
+			clusterVersionID = clusterObject.Version().RawID()
+		}
+
+		availableUpgrades, version := r.buildVersion(clusterVersionID)
+		err = r.checkUpgradeClusterVersion(availableUpgrades, version, cluster)
+		if err != nil {
+			response.Diagnostics.AddError(
+				"Can't update cluster version",
+				fmt.Sprintf(
+					"Received error %v", err,
+				),
+			)
+			return
+		}
+
+		r.checkSTSRolesCompatibility(r, cluster, mode, version, clusterKey)
+		version, err = ocm.CheckAndParseVersion(availableUpgrades, version)
+		if err != nil {
+			response.Diagnostics.AddError(
+				"Can't update cluster version",
+				fmt.Sprintf(
+					"Error parsing version to upgrade %v", err,
+				),
+			)
+			return
+		}
+		if !confirm.Confirm("upgrade cluster to version '%s'", version) {
+			response.Diagnostics.AddError(
+				"Can't update cluster version",
+				fmt.Sprintf(
+					"Error parsing version to upgrade %v", err,
+				),
+			)
+			return
+		}
+
+		clusterSpec := buildNodeDrainGracePeriod(r, cmd, cluster)
+		err = r.OCMClient.UpdateCluster(cluster.ID(), r.Creator, clusterSpec)
+		if err != nil {
+			r.Reporter.Errorf("Failed to update cluster '%s': %v", clusterKey, err)
+			os.Exit(1)
+		}
+
+		newVersion := plan.Version.Value
 
 	}
 
@@ -1135,16 +1163,71 @@ func (r *ClusterRosaClassicResource) Update(ctx context.Context, request tfsdk.U
 	response.Diagnostics.Append(diags...)
 }
 
-func (r *ClusterRosaClassicResource) checkIfUpgradeIsNeeded(originalVersion, newVersion string) (bool, error) {
-	wantedVersion, err := semver.NewVersion(newVersion)
-	if err != nil {
-		return false, err
+func (r *ClusterRosaClassicResource) checkUpgradeClusterVersion(availableUpgrades []string, clusterUpgradeVersion string) error {
+	validVersion := false
+	for _, v := range availableUpgrades {
+		isValidVersion, err := IsValidVersion(clusterUpgradeVersion, v, clusterVersion)
+		if err != nil {
+			return err
+		}
+		if isValidVersion {
+			validVersion = true
+			break
+		}
 	}
-	currentVersion, err := semver.NewVersion(originalVersion)
-	if err != nil {
-		return false, err
+	if !validVersion {
+		return weberr.Errorf(
+			"Expected a valid version to upgrade cluster to.\nValid versions: %s",
+			helper.SliceToSortedString(availableUpgrades),
+		)
 	}
-	return wantedVersion.GreaterThan(currentVersion), nil
+	return nil
+}
+func (r *ClusterRosaClassicResource) buildVersion(clusterVersionID string) ([]string, error) {
+	availableUpgrades, err := r.getAvailableUpgrades(clusterVersionID)
+	if err != nil {
+		return nil, err
+	}
+	if len(availableUpgrades) == 0 {
+		err = fmt.Errorf("there are no available upgrades")
+		return nil, err
+	}
+
+	return availableUpgrades, nil
+}
+
+func (r *ClusterRosaClassicResource) getAvailableUpgrades(versionID string) ([]string, error) {
+	response, err := r.versionCollection.Version(versionID).Get().Send()
+	if err != nil {
+		return nil, err
+	}
+
+	version := response.Body()
+	availableUpgrades := []string{}
+
+	for _, v := range version.AvailableUpgrades() {
+		id := r.createVersionID(v, version.ChannelGroup())
+		resp, err := r.versionCollection.Version(id).
+			Get().
+			Send()
+		if err != nil {
+			return nil, err
+		}
+		if resp.Body().ROSAEnabled() {
+			// Prepend versions so that the latest one shows up first
+			availableUpgrades = append([]string{v}, availableUpgrades...)
+		}
+	}
+
+	return availableUpgrades, nil
+}
+
+func (r *ClusterRosaClassicResource) createVersionID(version string, channelGroup string) string {
+	versionID := fmt.Sprintf("openshift-v%s", version)
+	if channelGroup != DefaultChannelGroup {
+		versionID = fmt.Sprintf("%s-%s", versionID, channelGroup)
+	}
+	return versionID
 }
 
 func (r *ClusterRosaClassicResource) checkExistingScheduledUpgrade(ctx context.Context, clusterID string) error {
