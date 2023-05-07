@@ -146,7 +146,10 @@ func generateBasicRosaClassicClusterState() *ClusterRosaClassicState {
 				},
 			},
 		},
-		Version: types.String{
+		CurrentVersion: types.String{
+			Value: "4.10",
+		},
+		TargetVersion: types.String{
 			Value: "4.10",
 		},
 		Proxy: &Proxy{
@@ -192,14 +195,14 @@ var _ = Describe("Rosa Classic Sts cluster", func() {
 
 	It("Throws an error when version format is invalid", func() {
 		clusterState := generateBasicRosaClassicClusterState()
-		clusterState.Version.Value = "a.4.1"
+		clusterState.TargetVersion.Value = "a.4.1"
 		_, err := createClassicClusterObject(context.Background(), clusterState, &logging.StdLogger{}, diag.Diagnostics{})
 		Expect(err).ToNot(BeNil())
 	})
 
 	It("Throws an error when version is unsupported", func() {
 		clusterState := generateBasicRosaClassicClusterState()
-		clusterState.Version.Value = "4.1.0"
+		clusterState.TargetVersion.Value = "4.1.0"
 		_, err := createClassicClusterObject(context.Background(), clusterState, &logging.StdLogger{}, diag.Diagnostics{})
 		Expect(err).ToNot(BeNil())
 	})

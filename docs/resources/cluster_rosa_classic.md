@@ -49,13 +49,14 @@ OpenShift managed cluster using rosa sts.
 - `service_cidr` (String) Block of IP addresses for services.
 - `sts` (Attributes) STS Configuration (see [below for nested schema](#nestedatt--sts))
 - `tags` (Map of String) Apply user defined tags to all resources created in AWS.
-- `version` (String) Identifier of the version of OpenShift, for example 'openshift-v4.1.0'.
+- `target_version` (String) Identifier of the target version of OpenShift, for example 'openshift-v4.1.0'.
 
 ### Read-Only
 
 - `api_url` (String) URL of the API server.
 - `ccs_enabled` (Boolean) Enables customer cloud subscription.
 - `console_url` (String) URL of the console.
+- `current_version` (String) Identifier of the current version of the cluster
 - `domain` (String) DNS Domain of Cluster
 - `id` (String) Unique identifier of the cluster.
 - `state` (String) State of the cluster.

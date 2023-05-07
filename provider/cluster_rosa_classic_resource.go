@@ -82,11 +82,6 @@ func (t *ClusterRosaClassicResourceType) GetSchema(ctx context.Context) (result 
 	result = tfsdk.Schema{
 		Description: "OpenShift managed cluster using rosa sts.",
 		Attributes: map[string]tfsdk.Attribute{
-			"id": {
-				Description: "Unique identifier of the cluster.",
-				Type:        types.StringType,
-				Computed:    true,
-			},
 			"external_id": {
 				Description: "Unique external identifier of the cluster.",
 				Type:        types.StringType,
@@ -160,11 +155,6 @@ func (t *ClusterRosaClassicResourceType) GetSchema(ctx context.Context) (result 
 					ValueCannotBeChangedModifier(t.logger),
 				},
 			},
-			"ccs_enabled": {
-				Description: "Enables customer cloud subscription.",
-				Type:        types.BoolType,
-				Computed:    true,
-			},
 			"etcd_encryption": {
 				Description: "Encrypt etcd data.",
 				Type:        types.BoolType,
@@ -188,21 +178,6 @@ func (t *ClusterRosaClassicResourceType) GetSchema(ctx context.Context) (result 
 				Description: "Max replicas.",
 				Type:        types.Int64Type,
 				Optional:    true,
-			},
-			"api_url": {
-				Description: "URL of the API server.",
-				Type:        types.StringType,
-				Computed:    true,
-			},
-			"console_url": {
-				Description: "URL of the console.",
-				Type:        types.StringType,
-				Computed:    true,
-			},
-			"domain": {
-				Description: "DNS Domain of Cluster",
-				Type:        types.StringType,
-				Computed:    true,
 			},
 			"replicas": {
 				Description: "Number of worker nodes to provision. Single zone clusters need at least 2 nodes, " +
@@ -349,11 +324,10 @@ func (t *ClusterRosaClassicResourceType) GetSchema(ctx context.Context) (result 
 					ValueCannotBeChangedModifier(t.logger),
 				},
 			},
-			"version": {
-				Description: "Identifier of the version of OpenShift, for example 'openshift-v4.1.0'.",
+			"target_version": {
+				Description: "Identifier of the target version of OpenShift, for example 'openshift-v4.1.0'.",
 				Type:        types.StringType,
 				Optional:    true,
-				Computed:    true,
 				// TODO: till AWS will support Managed policies we will not support update versions
 				PlanModifiers: []tfsdk.AttributePlanModifier{
 					ValueCannotBeChangedModifier(t.logger),
@@ -368,6 +342,36 @@ func (t *ClusterRosaClassicResourceType) GetSchema(ctx context.Context) (result 
 				Description: "Timeout in minutes for addressing cluster state in destroy resource. Default value is 60 minutes.",
 				Type:        types.Int64Type,
 				Optional:    true,
+			},
+			"id": {
+				Description: "Unique identifier of the cluster.",
+				Type:        types.StringType,
+				Computed:    true,
+			},
+			"ccs_enabled": {
+				Description: "Enables customer cloud subscription.",
+				Type:        types.BoolType,
+				Computed:    true,
+			},
+			"api_url": {
+				Description: "URL of the API server.",
+				Type:        types.StringType,
+				Computed:    true,
+			},
+			"console_url": {
+				Description: "URL of the console.",
+				Type:        types.StringType,
+				Computed:    true,
+			},
+			"domain": {
+				Description: "DNS Domain of Cluster",
+				Type:        types.StringType,
+				Computed:    true,
+			},
+			"current_version": {
+				Description: "Identifier of the current version of the cluster",
+				Type:        types.StringType,
+				Computed:    true,
 			},
 			"state": {
 				Description: "State of the cluster.",
@@ -600,14 +604,14 @@ func createClassicClusterObject(ctx context.Context,
 	if !network.Empty() {
 		builder.Network(network)
 	}
-	if !state.Version.Unknown && !state.Version.Null {
+	if !state.TargetVersion.Unknown && !state.TargetVersion.Null {
 		// TODO: update it to support all cluster versions
-		isSupported, err := checkSupportedVersion(state.Version.Value)
+		isSupported, err := checkSupportedVersion(state.TargetVersion.Value)
 		if err != nil {
 			logger.Error(ctx, "Error validating required cluster version %s\", err)")
 			errDecription := fmt.Sprintf(
 				"Can't check if cluster version is supported '%s': %v",
-				state.Version.Value, err,
+				state.TargetVersion.Value, err,
 			)
 			diags.AddError(
 				errHeadline,
@@ -616,12 +620,12 @@ func createClassicClusterObject(ctx context.Context,
 			return nil, errors.New(errHeadline + "\n" + errDecription)
 		}
 		if isSupported {
-			builder.Version(cmv1.NewVersion().ID(state.Version.Value))
+			builder.Version(cmv1.NewVersion().ID(state.TargetVersion.Value))
 		} else {
-			logger.Error(ctx, "Cluster version %s is not supported", state.Version.Value)
+			logger.Error(ctx, "Cluster version %s is not supported", state.TargetVersion.Value)
 			errDecription := fmt.Sprintf(
 				"Can't check if cluster version is supported '%s': %v",
-				state.Version.Value, err,
+				state.TargetVersion.Value, err,
 			)
 			diags.AddError(
 				errHeadline,
@@ -649,8 +653,8 @@ func (r *ClusterRosaClassicResource) validateAccountRoles(ctx context.Context, s
 	r.logger.Debug(ctx, "Validating if cluster version is compatible to account roles' version")
 	region := state.CloudRegion.Value
 	version := ""
-	if !state.Version.Unknown && !state.Version.Null {
-		version = state.Version.Value
+	if !state.TargetVersion.Unknown && !state.TargetVersion.Null {
+		version = state.TargetVersion.Value
 	}
 
 	if version == "" {
@@ -1416,11 +1420,11 @@ func populateRosaClassicClusterState(ctx context.Context, object *cmv1.Cluster, 
 	}
 	version, ok := object.Version().GetID()
 	if ok {
-		state.Version = types.String{
+		state.CurrentVersion = types.String{
 			Value: version,
 		}
 	} else {
-		state.Version = types.String{
+		state.CurrentVersion = types.String{
 			Null: true,
 		}
 	}

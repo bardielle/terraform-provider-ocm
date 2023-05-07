@@ -54,7 +54,8 @@ type ClusterRosaClassicState struct {
 	ServiceCIDR               types.String `tfsdk:"service_cidr"`
 	Proxy                     *Proxy       `tfsdk:"proxy"`
 	State                     types.String `tfsdk:"state"`
-	Version                   types.String `tfsdk:"version"`
+	TargetVersion             types.String `tfsdk:"target_version"`
+	CurrentVersion            types.String `tfsdk:"current_version"`
 	DisableWaitingInDestroy   types.Bool   `tfsdk:"disable_waiting_in_destroy"`
 	DestroyTimeout            types.Int64  `tfsdk:"destroy_timeout"`
 }
