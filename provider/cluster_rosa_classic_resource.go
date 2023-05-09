@@ -328,15 +328,29 @@ func (t *ClusterRosaClassicResourceType) GetSchema(ctx context.Context) (result 
 				Description: "Identifier of the target version of OpenShift, for example 'openshift-v4.1.0'.",
 				Type:        types.StringType,
 				Optional:    true,
-				// TODO: till AWS will support Managed policies we will not support update versions
-				PlanModifiers: []tfsdk.AttributePlanModifier{
-					ValueCannotBeChangedModifier(t.logger),
-				},
 			},
-			"disable_waiting_in_destroy": {
-				Description: "Disable addressing cluster state in the destroy resource. Default value is false",
-				Type:        types.BoolType,
-				Optional:    true,
+			"upgrade_cluster_properties": {
+				Description: "Upgrade cluster properties",
+				Attributes: tfsdk.SingleNestedAttributes(map[string]tfsdk.Attribute{
+					"schedule_upgrade_date": {
+						Description: "Next date the upgrade should run at the specified UTC time. Format should be 'yyyy-mm-dd'",
+						Type:        types.StringType,
+						Optional:    true,
+					},
+					"schedule_upgrade_time": {
+						Description: "Next UTC time that the upgrade should run on the specified date. Format should be 'HH:mm'",
+						Type:        types.StringType,
+						Optional:    true,
+					},
+					"node_drain_grace_period": {
+						Description: "You may set a grace period for how long Pod Disruption Budget-protected workloads will be respected during upgrades. " +
+							"After this grace period, any workloads protected by Pod Disruption Budgets that have not been successfully drained from a node will be forcibly evicted. " +
+							"Valid options are ['15 minutes','30 minutes','45 minutes','1 hour','2 hours','4 hours','8 hours'] (default \"1 hour\")",
+						Type:     types.StringType,
+						Optional: true,
+					},
+				}),
+				Optional: true,
 			},
 			"destroy_timeout": {
 				Description: "Timeout in minutes for addressing cluster state in destroy resource. Default value is 60 minutes.",
@@ -405,7 +419,8 @@ func (t *ClusterRosaClassicResourceType) NewResource(ctx context.Context,
 }
 
 const (
-	errHeadline = "Can't build cluster"
+	errHeadline                 = "Can't build cluster"
+	errUpgradePropertiesWereSet = "Upgrade properties cannot be set in the cluster creation flow"
 )
 
 func createClassicClusterObject(ctx context.Context,
@@ -649,6 +664,24 @@ func createClassicClusterObject(ctx context.Context,
 	return object, err
 }
 
+func (r *ClusterRosaClassicResource) validateUpgradePropertiesWereNotSet(state *ClusterRosaClassicState) error {
+	if state.UpgradeClusterProperties != nil {
+		if !state.UpgradeClusterProperties.NodeDrainGracePeriod.Unknown ||
+			!state.UpgradeClusterProperties.NodeDrainGracePeriod.Null ||
+			state.UpgradeClusterProperties.NodeDrainGracePeriod.Value != "" ||
+			!state.UpgradeClusterProperties.ScheduleUpgradeDate.Unknown ||
+			!state.UpgradeClusterProperties.ScheduleUpgradeDate.Null ||
+			state.UpgradeClusterProperties.ScheduleUpgradeDate.Value != "" ||
+			!state.UpgradeClusterProperties.ScheduleUpgradeTime.Unknown ||
+			!state.UpgradeClusterProperties.ScheduleUpgradeTime.Null ||
+			state.UpgradeClusterProperties.ScheduleUpgradeTime.Value != "" {
+			return errors.New(errHeadline + "\n" + errUpgradePropertiesWereSet)
+		}
+	}
+
+	return nil
+}
+
 func (r *ClusterRosaClassicResource) validateAccountRoles(ctx context.Context, state *ClusterRosaClassicState) error {
 	r.logger.Debug(ctx, "Validating if cluster version is compatible to account roles' version")
 	region := state.CloudRegion.Value
@@ -874,6 +907,19 @@ func (r *ClusterRosaClassicResource) Create(ctx context.Context,
 		)
 		return
 	}
+
+	err = r.validateUpgradePropertiesWereNotSet(state)
+	if err != nil {
+		response.Diagnostics.AddError(
+			"Can't build cluster",
+			fmt.Sprintf(
+				"Can't build cluster with name '%s': %v",
+				state.Name.Value, err,
+			),
+		)
+		return
+	}
+
 	object, err := createClassicClusterObject(ctx, state, r.logger, diags)
 	if err != nil {
 		response.Diagnostics.AddError(
@@ -973,45 +1019,21 @@ func (r *ClusterRosaClassicResource) Update(ctx context.Context, request tfsdk.U
 		return
 	}
 
-	// Send request to update the cluster:
-	updateNodes := false
 	clusterBuilder := cmv1.NewCluster()
-	clusterNodesBuilder := cmv1.NewClusterNodes()
-	compute, ok := common.ShouldPatchInt(state.Replicas, plan.Replicas)
-	if ok {
-		clusterNodesBuilder = clusterNodesBuilder.Compute(int(compute))
-		updateNodes = true
+	schduleUpgradeCluster := false
+
+	// Send request to update the cluster:
+	clusterBuilder, err := r.updateWorkerNodes(clusterBuilder, state, plan)
+	if err != nil {
+		response.Diagnostics.AddError(
+			"Can't update cluster",
+			fmt.Sprintf(
+				"Can't update cluster %s due to error %v", state.ID.Value, err,
+			),
+		)
+		return
 	}
 
-	if !plan.AutoScalingEnabled.Unknown && !plan.AutoScalingEnabled.Null && plan.AutoScalingEnabled.Value {
-		// autoscaling enabled
-		autoscaling := cmv1.NewMachinePoolAutoscaling()
-
-		if !plan.MaxReplicas.Unknown && !plan.MaxReplicas.Null {
-			autoscaling = autoscaling.MaxReplicas(int(plan.MaxReplicas.Value))
-		}
-		if !plan.MinReplicas.Unknown && !plan.MinReplicas.Null {
-			autoscaling = autoscaling.MinReplicas(int(plan.MinReplicas.Value))
-		}
-
-		clusterNodesBuilder = clusterNodesBuilder.AutoscaleCompute(autoscaling)
-		updateNodes = true
-
-	} else {
-		if (!plan.MaxReplicas.Unknown && !plan.MaxReplicas.Null) || (!plan.MinReplicas.Unknown && !plan.MinReplicas.Null) {
-			response.Diagnostics.AddError(
-				"Can't update cluster",
-				fmt.Sprintf(
-					"Can't update MaxReplica and/or MinReplica of cluster when autoscaling is not enabled",
-				),
-			)
-			return
-		}
-	}
-
-	if updateNodes {
-		clusterBuilder = clusterBuilder.Nodes(clusterNodesBuilder)
-	}
 	clusterSpec, err := clusterBuilder.Build()
 	if err != nil {
 		response.Diagnostics.AddError(
@@ -1059,6 +1081,44 @@ func (r *ClusterRosaClassicResource) Update(ctx context.Context, request tfsdk.U
 	response.Diagnostics.Append(diags...)
 }
 
+func (r *ClusterRosaClassicResource) updateWorkerNodes(clusterBuilder *cmv1.ClusterBuilder, state, plan *ClusterRosaClassicState) (*cmv1.ClusterBuilder, error) {
+	// Send request to update the cluster:
+	updateNodes := false
+	clusterNodesBuilder := cmv1.NewClusterNodes()
+
+	compute, ok := common.ShouldPatchInt(state.Replicas, plan.Replicas)
+	if ok {
+		clusterNodesBuilder = clusterNodesBuilder.Compute(int(compute))
+		updateNodes = true
+	}
+
+	if !plan.AutoScalingEnabled.Unknown && !plan.AutoScalingEnabled.Null && plan.AutoScalingEnabled.Value {
+		// autoscaling enabled
+		autoscaling := cmv1.NewMachinePoolAutoscaling()
+
+		if !plan.MaxReplicas.Unknown && !plan.MaxReplicas.Null {
+			autoscaling = autoscaling.MaxReplicas(int(plan.MaxReplicas.Value))
+		}
+		if !plan.MinReplicas.Unknown && !plan.MinReplicas.Null {
+			autoscaling = autoscaling.MinReplicas(int(plan.MinReplicas.Value))
+		}
+
+		clusterNodesBuilder = clusterNodesBuilder.AutoscaleCompute(autoscaling)
+		updateNodes = true
+
+	} else {
+		if (!plan.MaxReplicas.Unknown && !plan.MaxReplicas.Null) || (!plan.MinReplicas.Unknown && !plan.MinReplicas.Null) {
+			return nil, fmt.Errorf("Can't update MaxReplica and/or MinReplica of cluster when autoscaling is not enabled")
+		}
+	}
+
+	if updateNodes {
+		clusterBuilder = clusterBuilder.Nodes(clusterNodesBuilder)
+	}
+
+	return clusterBuilder, nil
+
+}
 func (r *ClusterRosaClassicResource) Delete(ctx context.Context, request tfsdk.DeleteResourceRequest,
 	response *tfsdk.DeleteResourceResponse) {
 	// Get the state:
