@@ -52,14 +52,15 @@ import (
 	ocm_errors "github.com/openshift-online/ocm-sdk-go/errors"
 	"github.com/openshift/rosa/pkg/ocm"
 	"github.com/openshift/rosa/pkg/properties"
-	"github.com/terraform-redhat/terraform-provider-rhcs/provider/common/attrvalidators"
-	"github.com/terraform-redhat/terraform-provider-rhcs/provider/proxy"
 
 	"github.com/terraform-redhat/terraform-provider-rhcs/build"
 	ocmr "github.com/terraform-redhat/terraform-provider-rhcs/internal/ocm/resource"
 	"github.com/terraform-redhat/terraform-provider-rhcs/provider/clusterrosaclassic/upgrade"
 	"github.com/terraform-redhat/terraform-provider-rhcs/provider/common"
+	"github.com/terraform-redhat/terraform-provider-rhcs/provider/common/attrvalidators"
+	"github.com/terraform-redhat/terraform-provider-rhcs/provider/defaultingress"
 	"github.com/terraform-redhat/terraform-provider-rhcs/provider/identityprovider"
+	"github.com/terraform-redhat/terraform-provider-rhcs/provider/proxy"
 )
 
 const (
@@ -330,6 +331,11 @@ func (r *ClusterRosaClassicResource) Schema(ctx context.Context, req resource.Sc
 				Attributes:  proxy.ProxyResource(),
 				Optional:    true,
 				Validators:  []validator.Object{proxy.ProxyValidator()},
+			},
+			"default_ingress": schema.SingleNestedAttribute{
+				Description: "Edit a cluster ingress (load balancer)",
+				Attributes:  defaultingress.IngressResource(),
+				Optional:    true,
 			},
 			"service_cidr": schema.StringAttribute{
 				Description: "Block of IP addresses for the cluster service network.",
@@ -706,6 +712,8 @@ func createClassicClusterObject(ctx context.Context,
 		builder.Htpasswd(htPasswdIDP)
 	}
 
+	builder = defaultingress.SetIngress(ctx, state.DefaultIngress, builder)
+
 	builder, err = buildProxy(state, builder)
 	if err != nil {
 		tflog.Error(ctx, "Failed to build the Proxy's attributes")
@@ -912,6 +920,18 @@ func (r *ClusterRosaClassicResource) Create(ctx context.Context, request resourc
 		return
 	}
 
+	err = defaultingress.ValidateDefaultIngress(ctx, state.DefaultIngress, version)
+	if err != nil {
+		response.Diagnostics.AddError(
+			summary,
+			fmt.Sprintf(
+				"Can't build cluster with name '%s': %v",
+				state.Name.ValueString(), err,
+			),
+		)
+		return
+	}
+
 	object, err := createClassicClusterObject(ctx, state, diags)
 	if err != nil {
 		response.Diagnostics.AddError(
@@ -952,7 +972,7 @@ func (r *ClusterRosaClassicResource) Create(ctx context.Context, request resourc
 	}
 
 	// Save the state:
-	err = populateRosaClassicClusterState(ctx, object, state, common.DefaultHttpClient{})
+	err = populateRosaClassicClusterState(ctx, object, state, common.DefaultHttpClient{}, r.clusterCollection)
 	if err != nil {
 		response.Diagnostics.AddError(
 			"Can't populate cluster state",
@@ -1000,7 +1020,7 @@ func (r *ClusterRosaClassicResource) Read(ctx context.Context, request resource.
 	object := get.Body()
 
 	// Save the state:
-	err = populateRosaClassicClusterState(ctx, object, state, common.DefaultHttpClient{})
+	err = populateRosaClassicClusterState(ctx, object, state, common.DefaultHttpClient{}, r.clusterCollection)
 	if err != nil {
 		response.Diagnostics.AddError(
 			"Can't populate cluster state",
@@ -1109,6 +1129,19 @@ func (r *ClusterRosaClassicResource) Update(ctx context.Context, request resourc
 		return
 	}
 
+	err = defaultingress.UpdateIngress(ctx, state.DefaultIngress, plan.DefaultIngress,
+		state.ID.ValueString(), state.Version.ValueString(), r.clusterCollection)
+	if err != nil {
+		response.Diagnostics.AddError(
+			"Can't update cluster ingress",
+			fmt.Sprintf(
+				"Can't update cluster with identifier '%s': %v",
+				state.ID.ValueString(), err,
+			),
+		)
+		return
+	}
+
 	update, err := r.clusterCollection.Cluster(state.ID.ValueString()).Update().
 		Body(clusterSpec).
 		SendContext(ctx)
@@ -1126,7 +1159,7 @@ func (r *ClusterRosaClassicResource) Update(ctx context.Context, request resourc
 	object := update.Body()
 
 	// Update the state:
-	err = populateRosaClassicClusterState(ctx, object, plan, common.DefaultHttpClient{})
+	err = populateRosaClassicClusterState(ctx, object, plan, common.DefaultHttpClient{}, r.clusterCollection)
 	if err != nil {
 		response.Diagnostics.AddError(
 			"Can't populate cluster state",
@@ -1396,7 +1429,7 @@ func (r *ClusterRosaClassicResource) ImportState(ctx context.Context, request re
 }
 
 // populateRosaClassicClusterState copies the data from the API object to the Terraform state.
-func populateRosaClassicClusterState(ctx context.Context, object *cmv1.Cluster, state *ClusterRosaClassicState, httpClient common.HttpClient) error {
+func populateRosaClassicClusterState(ctx context.Context, object *cmv1.Cluster, state *ClusterRosaClassicState, httpClient common.HttpClient, clusterCollection *cmv1.ClustersClient) error {
 	state.ID = types.StringValue(object.ID())
 	state.ExternalID = types.StringValue(object.ExternalID())
 	object.API()
@@ -1599,9 +1632,9 @@ func populateRosaClassicClusterState(ctx context.Context, object *cmv1.Cluster, 
 	} else {
 		state.HostPrefix = types.Int64Null()
 	}
-	channel_group, ok := object.Version().GetChannelGroup()
+	channelGroup, ok := object.Version().GetChannelGroup()
 	if ok {
-		state.ChannelGroup = types.StringValue(channel_group)
+		state.ChannelGroup = types.StringValue(channelGroup)
 	}
 
 	if awsObj, ok := object.GetAWS(); ok {
@@ -1619,7 +1652,7 @@ func populateRosaClassicClusterState(ctx context.Context, object *cmv1.Cluster, 
 	version, ok := object.Version().GetID()
 	// If we're using a non-default channel group, it will have been appended to
 	// the version ID. Remove it before saving state.
-	version = strings.TrimSuffix(version, fmt.Sprintf("-%s", channel_group))
+	version = strings.TrimSuffix(version, fmt.Sprintf("-%s", channelGroup))
 	version = strings.TrimPrefix(version, "openshift-v")
 	if ok {
 		tflog.Debug(ctx, fmt.Sprintf("actual cluster version: %v", version))
@@ -1632,6 +1665,13 @@ func populateRosaClassicClusterState(ctx context.Context, object *cmv1.Cluster, 
 	state.State = types.StringValue(string(object.State()))
 	state.Name = types.StringValue(object.Name())
 	state.CloudRegion = types.StringValue(object.Region().ID())
+
+	defaultIngress, err := defaultingress.PopulateDefaultIngress(ctx, state.DefaultIngress,
+		clusterCollection.Cluster(state.ID.ValueString()).Ingresses())
+	if err != nil {
+		return err
+	}
+	state.DefaultIngress = defaultIngress
 
 	return nil
 }
