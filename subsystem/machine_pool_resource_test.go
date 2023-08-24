@@ -317,7 +317,6 @@ var _ = Describe("Machine pool creation", func() {
 		// Run the apply command:
 		terraform.Source(`
 		  resource "rhcs_machine_pool" "my_pool" {
-            id           = "my-pool"
 		    cluster      = "123"
 		    name         = "my-pool"
 		    machine_type = "r5.xlarge"
