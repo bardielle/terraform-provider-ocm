@@ -219,8 +219,7 @@ func (g *GroupMembershipResource) ImportState(ctx context.Context, req resource.
 
 // populateState copies the data from the API object to the Terraform state.
 func (g *GroupMembershipResource) populateState(object *cmv1.User, state *GroupMembershipState) {
-	if id, ok := object.GetID(); ok {
-		state.ID = types.StringValue(id)
-		state.User = types.StringValue(id)
-	}
+	id := object.ID()
+	state.ID = types.StringValue(id)
+	state.User = types.StringValue(id)
 }

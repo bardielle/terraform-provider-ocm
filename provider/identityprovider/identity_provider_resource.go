@@ -310,10 +310,8 @@ func (r *IdentityProviderResource) Create(ctx context.Context, request resource.
 		if state.LDAP == nil {
 			state.LDAP = &LDAPIdentityProvider{}
 		}
-		insecure, ok := ldapObject.GetInsecure()
-		if ok {
-			state.LDAP.Insecure = types.BoolValue(insecure)
-		}
+		state.LDAP.Insecure = types.BoolValue(ldapObject.Insecure())
+
 	case openidObject != nil:
 	}
 
@@ -465,50 +463,42 @@ func (r *IdentityProviderResource) Read(ctx context.Context, request resource.Re
 		if ok {
 			state.LDAP.CA = types.StringValue(ca)
 		}
-		insecure, ok := ldapObject.GetInsecure()
-		if ok {
-			state.LDAP.Insecure = types.BoolValue(insecure)
-		}
+
+		state.LDAP.Insecure = types.BoolValue(ldapObject.Insecure())
 		url, ok := ldapObject.GetURL()
 		if ok {
 			state.LDAP.URL = types.StringValue(url)
 		}
-		attributes, ok := ldapObject.GetAttributes()
-		if ok {
-			if state.LDAP.Attributes == nil {
-				state.LDAP.Attributes = &LDAPIdentityProviderAttributes{}
-			}
-			id, ok := attributes.GetID()
-			if ok {
-				state.LDAP.Attributes.ID, err = common.StringArrayToList(id)
-				if err != nil {
-					response.Diagnostics.AddError("failed to convert LDAP attribute ID to tf list", err.Error())
-				}
-			}
-			email, ok := attributes.GetEmail()
-			if ok {
-				state.LDAP.Attributes.EMail, err = common.StringArrayToList(email)
-				if err != nil {
-					response.Diagnostics.AddError("failed to convert LDAP attribute EMail to tf list", err.Error())
-				}
-			} else {
-				state.LDAP.Attributes.EMail = types.ListNull(types.StringType)
-			}
-			name, ok := attributes.GetName()
-			if ok {
-				state.LDAP.Attributes.Name, err = common.StringArrayToList(name)
-				if err != nil {
-					response.Diagnostics.AddError("failed to convert LDAP attribute Name to tf list", err.Error())
-				}
-			}
-			preferredUsername, ok := attributes.GetPreferredUsername()
-			if ok {
-				state.LDAP.Attributes.PreferredUsername, err = common.StringArrayToList(preferredUsername)
-				if err != nil {
-					response.Diagnostics.AddError("failed to convert LDAP attribute PreferredUsername to tf list", err.Error())
-				}
-			}
+		attributes := ldapObject.Attributes()
+		if state.LDAP.Attributes == nil {
+			state.LDAP.Attributes = &LDAPIdentityProviderAttributes{}
 		}
+
+		state.LDAP.Attributes.ID, err = common.StringArrayToList(attributes.ID())
+		if err != nil {
+			response.Diagnostics.AddError("failed to convert LDAP attribute ID to tf list", err.Error())
+		}
+
+		email, ok := attributes.GetEmail()
+		if ok {
+			state.LDAP.Attributes.EMail, err = common.StringArrayToList(email)
+			if err != nil {
+				response.Diagnostics.AddError("failed to convert LDAP attribute EMail to tf list", err.Error())
+			}
+		} else {
+			state.LDAP.Attributes.EMail = types.ListNull(types.StringType)
+		}
+
+		state.LDAP.Attributes.Name, err = common.StringArrayToList(attributes.Name())
+		if err != nil {
+			response.Diagnostics.AddError("failed to convert LDAP attribute Name to tf list", err.Error())
+		}
+
+		state.LDAP.Attributes.PreferredUsername, err = common.StringArrayToList(attributes.PreferredUsername())
+		if err != nil {
+			response.Diagnostics.AddError("failed to convert LDAP attribute PreferredUsername to tf list", err.Error())
+		}
+
 	case openidObject != nil:
 		if state.OpenID == nil {
 			state.OpenID = &OpenIDIdentityProvider{}

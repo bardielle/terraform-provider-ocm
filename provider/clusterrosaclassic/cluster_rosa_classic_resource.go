@@ -1469,28 +1469,28 @@ func populateRosaClassicClusterState(ctx context.Context, object *cmv1.Cluster, 
 	state.Name = types.StringValue(object.Name())
 	state.CloudRegion = types.StringValue(object.Region().ID())
 	state.MultiAZ = types.BoolValue(object.MultiAZ())
-	if props, ok := object.GetProperties(); ok {
-		propertiesMap := map[string]string{}
-		ocmPropertiesMap := map[string]string{}
-		for k, v := range props {
-			ocmPropertiesMap[k] = v
-			if _, isDefault := OCMProperties[k]; !isDefault {
-				propertiesMap[k] = v
-			}
-		}
-		mapValue, err := common.ConvertStringMapToMapType(propertiesMap)
-		if err != nil {
-			return err
-		} else {
-			state.Properties = mapValue
-		}
-		mapValue, err = common.ConvertStringMapToMapType(ocmPropertiesMap)
-		if err != nil {
-			return err
-		} else {
-			state.OCMProperties = mapValue
+	props := object.Properties()
+	propertiesMap := map[string]string{}
+	ocmPropertiesMap := map[string]string{}
+	for k, v := range props {
+		ocmPropertiesMap[k] = v
+		if _, isDefault := OCMProperties[k]; !isDefault {
+			propertiesMap[k] = v
 		}
 	}
+	mapValue, err := common.ConvertStringMapToMapType(propertiesMap)
+	if err != nil {
+		return err
+	} else {
+		state.Properties = mapValue
+	}
+	mapValue, err = common.ConvertStringMapToMapType(ocmPropertiesMap)
+	if err != nil {
+		return err
+	} else {
+		state.OCMProperties = mapValue
+	}
+
 	state.APIURL = types.StringValue(object.API().URL())
 	state.ConsoleURL = types.StringValue(object.Console().URL())
 	state.Domain = types.StringValue(fmt.Sprintf("%s.%s", object.Name(), object.DNS().BaseDomain()))
@@ -1536,15 +1536,12 @@ func populateRosaClassicClusterState(ctx context.Context, object *cmv1.Cluster, 
 		state.MinReplicas = types.Int64Null()
 	}
 
-	if azs, ok := object.Nodes().GetAvailabilityZones(); ok {
-		listValue, err := common.StringArrayToList(azs)
-		if err != nil {
-			return err
-		}
-		state.AvailabilityZones = listValue
-	} else {
-		state.AvailabilityZones = types.ListNull(types.StringType)
+	azs := object.Nodes().AvailabilityZones()
+	listValue, err := common.StringArrayToList(azs)
+	if err != nil {
+		return err
 	}
+	state.AvailabilityZones = listValue
 
 	state.CCSEnabled = types.BoolValue(object.CCS().Enabled())
 
@@ -1571,18 +1568,9 @@ func populateRosaClassicClusterState(ctx context.Context, object *cmv1.Cluster, 
 
 	}
 
-	awsPrivateLink, ok := object.AWS().GetPrivateLink()
-	if ok {
-		state.AWSPrivateLink = types.BoolValue(awsPrivateLink)
-	} else {
-		state.AWSPrivateLink = types.BoolValue(true)
-	}
-	listeningMethod, ok := object.API().GetListening()
-	if ok {
-		state.Private = types.BoolValue(listeningMethod == cmv1.ListeningMethodInternal)
-	} else {
-		state.Private = types.BoolValue(true)
-	}
+	state.AWSPrivateLink = types.BoolValue(object.AWS().PrivateLink())
+	listeningMethod := object.API().Listening()
+	state.Private = types.BoolValue(listeningMethod == cmv1.ListeningMethodInternal)
 	kmsKeyArn, ok := object.AWS().GetKMSKeyArn()
 	if ok {
 		state.KMSKeyArn = types.StringValue(kmsKeyArn)
@@ -1671,34 +1659,13 @@ func populateRosaClassicClusterState(ctx context.Context, object *cmv1.Cluster, 
 		state.Proxy.AdditionalTrustBundle = types.StringValue(trustBundle)
 	}
 
-	machineCIDR, ok := object.Network().GetMachineCIDR()
-	if ok {
-		state.MachineCIDR = types.StringValue(machineCIDR)
-	} else {
-		state.MachineCIDR = types.StringNull()
-	}
-	serviceCIDR, ok := object.Network().GetServiceCIDR()
-	if ok {
-		state.ServiceCIDR = types.StringValue(serviceCIDR)
-	} else {
-		state.ServiceCIDR = types.StringNull()
-	}
-	podCIDR, ok := object.Network().GetPodCIDR()
-	if ok {
-		state.PodCIDR = types.StringValue(podCIDR)
-	} else {
-		state.PodCIDR = types.StringNull()
-	}
-	hostPrefix, ok := object.Network().GetHostPrefix()
-	if ok {
-		state.HostPrefix = types.Int64Value(int64(hostPrefix))
-	} else {
-		state.HostPrefix = types.Int64Null()
-	}
-	channel_group, ok := object.Version().GetChannelGroup()
-	if ok {
-		state.ChannelGroup = types.StringValue(channel_group)
-	}
+	state.MachineCIDR = types.StringValue(object.Network().MachineCIDR())
+	state.ServiceCIDR = types.StringValue(object.Network().ServiceCIDR())
+	state.PodCIDR = types.StringValue(object.Network().PodCIDR())
+	state.HostPrefix = types.Int64Value(int64(object.Network().HostPrefix()))
+
+	channel_group := object.Version().ChannelGroup()
+	state.ChannelGroup = types.StringValue(channel_group)
 
 	if awsObj, ok := object.GetAWS(); ok {
 		id := awsObj.PrivateHostedZoneID()
@@ -1712,19 +1679,14 @@ func populateRosaClassicClusterState(ctx context.Context, object *cmv1.Cluster, 
 		}
 	}
 
-	version, ok := object.Version().GetID()
+	version := object.Version().ID()
 	// If we're using a non-default channel group, it will have been appended to
 	// the version ID. Remove it before saving state.
 	version = strings.TrimSuffix(version, fmt.Sprintf("-%s", channel_group))
 	version = strings.TrimPrefix(version, "openshift-v")
-	if ok {
-		tflog.Debug(ctx, fmt.Sprintf("actual cluster version: %v", version))
-		state.CurrentVersion = types.StringValue(version)
-	} else {
-		tflog.Debug(ctx, "Unknown cluster version")
-		state.CurrentVersion = types.StringNull()
+	tflog.Debug(ctx, fmt.Sprintf("actual cluster version: %v", version))
+	state.CurrentVersion = types.StringValue(version)
 
-	}
 	state.State = types.StringValue(string(object.State()))
 	state.Name = types.StringValue(object.Name())
 	state.CloudRegion = types.StringValue(object.Region().ID())

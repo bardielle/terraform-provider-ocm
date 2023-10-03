@@ -603,14 +603,12 @@ func populateClusterState(object *cmv1.Cluster, state *ClusterState) error {
 	state.ComputeNodes = types.Int64Value(int64(object.Nodes().Compute()))
 	state.ComputeMachineType = types.StringValue(object.Nodes().ComputeMachineType().ID())
 
-	azs, ok := object.Nodes().GetAvailabilityZones()
-	if ok {
-		listValue, err := common.StringArrayToList(azs)
-		if err != nil {
-			return err
-		} else {
-			state.AvailabilityZones = listValue
-		}
+	azs := object.Nodes().AvailabilityZones()
+	listValue, err := common.StringArrayToList(azs)
+	if err != nil {
+		return err
+	} else {
+		state.AvailabilityZones = listValue
 	}
 
 	state.CCSEnabled = types.BoolValue(object.CCS().Enabled())
@@ -628,12 +626,8 @@ func populateClusterState(object *cmv1.Cluster, state *ClusterState) error {
 	if ok {
 		state.AWSSecretAccessKey = types.StringValue(awsSecretAccessKey)
 	}
-	awsPrivateLink, ok := object.AWS().GetPrivateLink()
-	if ok {
-		state.AWSPrivateLink = types.BoolValue(awsPrivateLink)
-	} else {
-		state.AWSPrivateLink = types.BoolValue(true)
-	}
+
+	state.AWSPrivateLink = types.BoolValue(object.AWS().PrivateLink())
 
 	subnetIds, ok := object.AWS().GetSubnetIDs()
 	if ok {
@@ -650,36 +644,11 @@ func populateClusterState(object *cmv1.Cluster, state *ClusterState) error {
 		state.Proxy.HttpsProxy = types.StringValue(proxyObj.HTTPSProxy())
 	}
 
-	machineCIDR, ok := object.Network().GetMachineCIDR()
-	if ok {
-		state.MachineCIDR = types.StringValue(machineCIDR)
-	} else {
-		state.MachineCIDR = types.StringNull()
-	}
-	serviceCIDR, ok := object.Network().GetServiceCIDR()
-	if ok {
-		state.ServiceCIDR = types.StringValue(serviceCIDR)
-	} else {
-		state.ServiceCIDR = types.StringNull()
-	}
-	podCIDR, ok := object.Network().GetPodCIDR()
-	if ok {
-		state.PodCIDR = types.StringValue(podCIDR)
-	} else {
-		state.PodCIDR = types.StringNull()
-	}
-	hostPrefix, ok := object.Network().GetHostPrefix()
-	if ok {
-		state.HostPrefix = types.Int64Value(int64(hostPrefix))
-	} else {
-		state.HostPrefix = types.Int64Null()
-	}
-	version, ok := object.Version().GetID()
-	if ok {
-		state.Version = types.StringValue(version)
-	} else {
-		state.Version = types.StringNull()
-	}
+	state.MachineCIDR = types.StringValue(object.Network().MachineCIDR())
+	state.ServiceCIDR = types.StringValue(object.Network().ServiceCIDR())
+	state.PodCIDR = types.StringValue(object.Network().PodCIDR())
+	state.HostPrefix = types.Int64Value(int64(object.Network().HostPrefix()))
+	state.Version = types.StringValue(object.Version().ID())
 	state.State = types.StringValue(string(object.State()))
 
 	return nil

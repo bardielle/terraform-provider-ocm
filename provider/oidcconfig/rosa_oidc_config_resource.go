@@ -338,27 +338,24 @@ func (o *RosaOidcConfigResource) ImportState(ctx context.Context, request resour
 
 // populateState copies the data from the API object to the Terraform state.
 func (o *RosaOidcConfigResource) populateState(ctx context.Context, object *cmv1.OidcConfig, state *RosaOidcConfigState) {
-	if id, ok := object.GetID(); ok {
-		state.ID = types.StringValue(id)
-	}
+	state.ID = types.StringValue(object.ID())
+	state.Managed = types.BoolValue(object.Managed())
 
-	if managed, ok := object.GetManaged(); ok {
-		state.Managed = types.BoolValue(managed)
-	}
-
-	issuerUrl, ok := object.GetIssuerUrl()
-	if ok && issuerUrl != "" {
-		state.IssuerUrl = types.StringValue(issuerUrl)
-	}
+	issuerUrl := object.IssuerUrl()
+	state.IssuerUrl = types.StringValue(issuerUrl)
 
 	installerRoleArn, ok := object.GetInstallerRoleArn()
-	if ok && installerRoleArn != "" {
+	if ok {
 		state.InstallerRoleARN = types.StringValue(installerRoleArn)
+	} else {
+		state.InstallerRoleARN = types.StringUnknown()
 	}
 
 	secretArn, ok := object.GetSecretArn()
-	if ok && secretArn != "" {
+	if ok {
 		state.SecretARN = types.StringValue(secretArn)
+	} else {
+		state.InstallerRoleARN = types.StringUnknown()
 	}
 
 	oidcEndpointURL := issuerUrl
@@ -374,5 +371,4 @@ func (o *RosaOidcConfigResource) populateState(ctx context.Context, object *cmv1
 	} else {
 		state.Thumbprint = types.StringValue(thumbprint)
 	}
-
 }

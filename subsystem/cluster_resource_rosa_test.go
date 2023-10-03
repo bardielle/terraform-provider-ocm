@@ -86,7 +86,8 @@ var _ = Describe("rhcs_cluster_rosa_classic - create", func() {
 	  },
 	  
 	  "version": {
-		  "id": "openshift-4.8.0"
+		  "id": "openshift-4.8.0",
+		  "channel_group": "stable"
 	  },
       "dns" : {
           "base_domain": "mycluster-api.example.com"
@@ -277,7 +278,7 @@ var _ = Describe("rhcs_cluster_rosa_classic - create", func() {
 							"value": "openshift-v4.50.0-fast"
 						},
 						{
-							"op": "add",
+							"op": "replace",
 							"path": "/version/channel_group",
 							"value": "fast"
 						}
@@ -3170,7 +3171,8 @@ var _ = Describe("rhcs_cluster_rosa_classic - upgrade", func() {
 			}
 		},
 		"version": {
-			"id": "4.10.0"
+			"id": "4.10.0",
+			"channel_group": "stable"
 		}
 	}`
 	const versionList = `{

@@ -251,7 +251,7 @@ func (r *MachinePoolResource) Create(ctx context.Context, req resource.CreateReq
 	}
 
 	// Create the machine pool:
-	resource := r.collection.Cluster(state.Cluster.ValueString())
+	clusterResource := r.collection.Cluster(state.Cluster.ValueString())
 	builder := cmv1.NewMachinePool().ID(state.ID.ValueString()).InstanceType(state.MachineType.ValueString())
 	builder.ID(state.Name.ValueString())
 
@@ -352,7 +352,7 @@ func (r *MachinePoolResource) Create(ctx context.Context, req resource.CreateReq
 		return
 	}
 
-	collection := resource.MachinePools()
+	collection := clusterResource.MachinePools()
 	add, err := collection.Add().Body(object).SendContext(ctx)
 	if err != nil {
 		resp.Diagnostics.AddError(
@@ -428,10 +428,10 @@ func (r *MachinePoolResource) Update(ctx context.Context, req resource.UpdateReq
 		return
 	}
 
-	resource := r.collection.Cluster(state.Cluster.ValueString()).
+	clusterResource := r.collection.Cluster(state.Cluster.ValueString()).
 		MachinePools().
 		MachinePool(state.ID.ValueString())
-	_, err := resource.Get().SendContext(ctx)
+	_, err := clusterResource.Get().SendContext(ctx)
 
 	if err != nil {
 		resp.Diagnostics.AddError(
@@ -676,10 +676,10 @@ func (r *MachinePoolResource) Delete(ctx context.Context, req resource.DeleteReq
 	}
 
 	// Send the request to delete the machine pool:
-	resource := r.collection.Cluster(state.Cluster.ValueString()).
+	clusterResource := r.collection.Cluster(state.Cluster.ValueString()).
 		MachinePools().
 		MachinePool(state.ID.ValueString())
-	_, err := resource.Delete().SendContext(ctx)
+	_, err := clusterResource.Delete().SendContext(ctx)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Cannot delete machine pool",
@@ -716,6 +716,7 @@ func (r *MachinePoolResource) ImportState(ctx context.Context, req resource.Impo
 func (r *MachinePoolResource) populateState(object *cmv1.MachinePool, state *MachinePoolState) {
 	state.ID = types.StringValue(object.ID())
 	state.Name = types.StringValue(object.ID())
+	state.MachineType = types.StringValue(object.InstanceType())
 
 	if getAWS, ok := object.GetAWS(); ok {
 		if spotMarketOptions, ok := getAWS.GetSpotMarketOptions(); ok {
@@ -725,7 +726,6 @@ func (r *MachinePoolResource) populateState(object *cmv1.MachinePool, state *Mac
 			}
 		}
 	}
-
 	autoscaling, ok := object.GetAutoscaling()
 	if ok {
 		var minReplicas, maxReplicas int
@@ -738,13 +738,6 @@ func (r *MachinePoolResource) populateState(object *cmv1.MachinePool, state *Mac
 		if ok {
 			state.MaxReplicas = types.Int64Value(int64(maxReplicas))
 		}
-	} else {
-		state.MaxReplicas = types.Int64Null()
-		state.MinReplicas = types.Int64Null()
-	}
-
-	if instanceType, ok := object.GetInstanceType(); ok {
-		state.MachineType = types.StringValue(instanceType)
 	}
 
 	if replicas, ok := object.GetReplicas(); ok {
