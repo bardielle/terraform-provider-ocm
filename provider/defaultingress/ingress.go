@@ -87,14 +87,11 @@ func IngressResource() map[string]schema.Attribute {
 func PopulateDefaultIngress(ctx context.Context, state *DefaultIngress,
 	client *cmv1.IngressesClient) (*DefaultIngress, error) {
 
-	// in case default ingress is not part of state no need to populate it
-	if state == nil {
-		return nil, nil
-	}
 	ingresses, err := client.List().SendContext(ctx)
 	if err != nil {
 		return nil, err
 	}
+
 	for _, ingress := range ingresses.Items().Slice() {
 		if ingress.Default() {
 			if state == nil {
@@ -108,6 +105,8 @@ func PopulateDefaultIngress(ctx context.Context, state *DefaultIngress,
 				if err != nil {
 					return nil, err
 				}
+			} else {
+				state.RouteSelectors = types.MapNull(types.StringType)
 			}
 
 			excludedNamespaces, ok := ingress.GetExcludedNamespaces()
@@ -116,6 +115,8 @@ func PopulateDefaultIngress(ctx context.Context, state *DefaultIngress,
 				if err != nil {
 					return nil, err
 				}
+			} else {
+				state.ExcludedNamespaces = types.ListNull(types.StringType)
 			}
 			wp, ok := ingress.GetRouteWildcardPolicy()
 			if ok {
